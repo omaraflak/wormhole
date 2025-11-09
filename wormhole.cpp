@@ -15,11 +15,9 @@ constexpr float INV_TWO_PI = 1.0f / TWO_PI;
 
 typedef struct
 {
-    float t;
     float l;
     float th;
     float ph;
-    float vt;
     float vl;
     float vth;
     float vph;
@@ -35,56 +33,23 @@ inline static float r_prime_of_l(float l, float b, float L)
     return powf(powf(l, L) + powf(b, L), 1 / L - 1) * powf(l, L - 1);
 }
 
-// Compute Christoffel symbols
-// t=0,l=1,θ=2,φ=3
-inline static void christoffels(
-    float l,
-    float b,
-    float L,
-    float theta,
-    float &g122,
-    float &g133,
-    float &g212,
-    float &g233,
-    float &g323)
-{
-    float st, ct;
-    __sincosf(theta, &st, &ct);
-
-    float r = r_of_l(l, b, L);
-    float rp = r_prime_of_l(l, b, L);
-
-    // Γ^l_{θθ}
-    g122 = -r * rp;
-
-    // Γ^l_{φφ}
-    g133 = -r * rp * st * st;
-
-    // Γ^θ_{lθ} = Γ^θ_{θl} = Γ^φ_{lφ} = Γ^φ_{φl}
-    g212 = rp / (r + 1e-12);
-
-    // Γ^θ_{φφ}
-    g233 = -st * ct;
-
-    // Γ^φ_{θφ} = Γ^φ_{φθ}
-    g323 = ct / (st + 1e-12);
-}
-
 // Right-hand side of differential equation
 void rhs(const State &state, float b, float L, State &result)
 {
-    float g122, g133, g212, g233, g323;
-    christoffels(state.l, b, L, state.th, g122, g133, g212, g233, g323);
+    float st, ct;
+    __sincosf(state.th, &st, &ct);
 
-    float al = -g122 * state.vth * state.vth - g133 * state.vph * state.vph;
-    float ath = -2 * g212 * state.vl * state.vth - g233 * state.vph * state.vph;
-    float aph = -2 * g212 * state.vl * state.vph - 2 * g323 * state.vth * state.vph;
+    float r = r_of_l(state.l, b, L);
+    float rp = r_prime_of_l(state.l, b, L);
+    float rpr = rp / r;
 
-    result.t = state.vt;
+    float al = r * rp * state.vth * state.vth + r * rp * st * st * state.vph * state.vph;
+    float ath = -2 * rpr * state.vl * state.vth + st * ct * state.vph * state.vph;
+    float aph = -2 * rpr * state.vl * state.vph - 2 * (ct / (st + 1e-12)) * state.vth * state.vph;
+
     result.l = state.vl;
     result.th = state.vth;
     result.ph = state.vph;
-    result.vt = 0;
     result.vl = al;
     result.vth = ath;
     result.vph = aph;
@@ -97,42 +62,34 @@ void rk4_step(State &s, float dt, float b, float L)
 
     rhs(s, b, L, k1);
 
-    tmp.t = s.t + 0.5f * dt * k1.t;
     tmp.l = s.l + 0.5f * dt * k1.l;
     tmp.th = s.th + 0.5f * dt * k1.th;
     tmp.ph = s.ph + 0.5f * dt * k1.ph;
-    tmp.vt = s.vt + 0.5f * dt * k1.vt;
     tmp.vl = s.vl + 0.5f * dt * k1.vl;
     tmp.vth = s.vth + 0.5f * dt * k1.vth;
     tmp.vph = s.vph + 0.5f * dt * k1.vph;
     rhs(tmp, b, L, k2);
 
-    tmp.t = s.t + 0.5f * dt * k2.t;
     tmp.l = s.l + 0.5f * dt * k2.l;
     tmp.th = s.th + 0.5f * dt * k2.th;
     tmp.ph = s.ph + 0.5f * dt * k2.ph;
-    tmp.vt = s.vt + 0.5f * dt * k2.vt;
     tmp.vl = s.vl + 0.5f * dt * k2.vl;
     tmp.vth = s.vth + 0.5f * dt * k2.vth;
     tmp.vph = s.vph + 0.5f * dt * k2.vph;
     rhs(tmp, b, L, k3);
 
-    tmp.t = s.t + dt * k3.t;
     tmp.l = s.l + dt * k3.l;
     tmp.th = s.th + dt * k3.th;
     tmp.ph = s.ph + dt * k3.ph;
-    tmp.vt = s.vt + dt * k3.vt;
     tmp.vl = s.vl + dt * k3.vl;
     tmp.vth = s.vth + dt * k3.vth;
     tmp.vph = s.vph + dt * k3.vph;
     rhs(tmp, b, L, k4);
 
     const float w = dt / 6.0f;
-    s.t = s.t + w * (k1.t + 2.f * k2.t + 2.f * k3.t + k4.t);
     s.l = s.l + w * (k1.l + 2.f * k2.l + 2.f * k3.l + k4.l);
     s.th = s.th + w * (k1.th + 2.f * k2.th + 2.f * k3.th + k4.th);
     s.ph = s.ph + w * (k1.ph + 2.f * k2.ph + 2.f * k3.ph + k4.ph);
-    s.vt = s.vt + w * (k1.vt + 2.f * k2.vt + 2.f * k3.vt + k4.vt);
     s.vl = s.vl + w * (k1.vl + 2.f * k2.vl + 2.f * k3.vl + k4.vl);
     s.vth = s.vth + w * (k1.vth + 2.f * k2.vth + 2.f * k3.vth + k4.vth);
     s.vph = s.vph + w * (k1.vph + 2.f * k2.vph + 2.f * k3.vph + k4.vph);
@@ -179,7 +136,6 @@ inline float mod2pi(float x)
 
 int map_coordinates_to_pixel(
     float l, float theta, float phi,
-    float th0, float ph0,
     const Img &space1, const Img &space2)
 {
     const auto &space = l > 0 ? space1 : space2;
@@ -200,9 +156,8 @@ int map_coordinates_to_pixel(
 // Trace geodesic and return a color value
 int trace_geodesic(State &state, float dt, int tmax, float b, float L, const Img &space1, const Img &space2)
 {
-    float th0 = state.th;
-    float ph0 = state.ph;
-    while (state.t < tmax)
+    int steps = tmax / dt;
+    for (int i = 0; i < steps; i++)
     {
         if (fabsf(state.vph) > 0.3 || fabsf(state.vth) > 0.6)
         {
@@ -218,7 +173,7 @@ int trace_geodesic(State &state, float dt, int tmax, float b, float L, const Img
             break;
         }
     }
-    return map_coordinates_to_pixel(state.l, state.th, state.ph, th0, ph0, space1, space2);
+    return map_coordinates_to_pixel(state.l, state.th, state.ph, space1, space2);
 }
 
 // Makes the initial state for RK4 integration
@@ -231,17 +186,13 @@ void init_state(
     float r = r_of_l(l0, b, L);
     float st = fmaxf(sin(th0), 1e-9);
 
-    // null normalization: choose t' so that k^μ k_μ = 0 → t'^2 = l'^2 + r(l)^2(θ'^2 + sin^2θ φ'^2)
     float vl = c_r;
     float vth = c_th / r;
     float vph = c_ph / (r * st);
-    float vt = sqrt(vl * vl + r * r * (vth * vth + (st * st) * vph * vph));
 
-    state.t = 0.0;
     state.l = l0;
     state.th = th0;
     state.ph = ph0;
-    state.vt = vt;
     state.vl = vl;
     state.vth = vth;
     state.vph = vph;
