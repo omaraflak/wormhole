@@ -37,8 +37,8 @@ __forceinline__ __device__ float mod2pi(float phi)
 
 struct State
 {
-    float t, l, th, ph;
-    float vt, vl, vth, vph;
+    float l, th, ph;
+    float vl, vth, vph;
 };
 
 __forceinline__ __device__ float r_of_l(float l, float b, float L)
@@ -51,37 +51,22 @@ __forceinline__ __device__ float r_prime_of_l(float l, float b, float L)
     return powf(powf(l, L) + powf(b, L), 1 / L - 1) * powf(l, L - 1);
 }
 
-__forceinline__ __device__ void christoffels(
-    float l, float b, float L, float theta,
-    float &g122, float &g133, float &g212, float &g233, float &g323)
-{
-    float st, ct;
-    __sincosf(theta, &st, &ct);
-
-    float r = r_of_l(l, b, L);
-    float rp = r_prime_of_l(l, b, L);
-
-    g122 = -r * rp;
-    g133 = -r * rp * st * st;
-    g212 = rp / (r + 1e-12f);
-    g233 = -st * ct;
-    g323 = ct / (st + 1e-12f);
-}
-
 __forceinline__ __device__ void rhs(const State &s, float b, float L, State &out)
 {
-    float g122, g133, g212, g233, g323;
-    christoffels(s.l, b, L, s.th, g122, g133, g212, g233, g323);
+    float st, ct;
+    __sincosf(s.th, &st, &ct);
 
-    float al = -g122 * s.vth * s.vth - g133 * s.vph * s.vph;
-    float ath = -2 * g212 * s.vl * s.vth - g233 * s.vph * s.vph;
-    float aph = -2 * g212 * s.vl * s.vph - 2 * g323 * s.vth * s.vph;
+    float r = r_of_l(s.l, b, L);
+    float rp = r_prime_of_l(s.l, b, L);
+    float rpr = rp / (r + 1e-12f);
 
-    out.t = s.vt;
+    float al = r * rp * s.vth * s.vth + r * rp * st * st * s.vph * s.vph;
+    float ath = -2 * rpr * s.vl * s.vth + st * ct * s.vph * s.vph;
+    float aph = -2 * rpr * s.vl * s.vph - 2 * (ct / (st + 1e-12f)) * s.vth * s.vph;
+
     out.l = s.vl;
     out.th = s.vth;
     out.ph = s.vph;
-    out.vt = 0;
     out.vl = al;
     out.vth = ath;
     out.vph = aph;
@@ -94,31 +79,25 @@ __forceinline__ __device__ void rk4_step(State &s, float dt, float b, float L)
     rhs(s, b, L, k1);
 
     const float hdt = 0.5f * dt;
-    tmp.t = __fmaf_rn(hdt, k1.t, s.t);
     tmp.l = __fmaf_rn(hdt, k1.l, s.l);
     tmp.th = __fmaf_rn(hdt, k1.th, s.th);
     tmp.ph = __fmaf_rn(hdt, k1.ph, s.ph);
-    tmp.vt = __fmaf_rn(hdt, k1.vt, s.vt);
     tmp.vl = __fmaf_rn(hdt, k1.vl, s.vl);
     tmp.vth = __fmaf_rn(hdt, k1.vth, s.vth);
     tmp.vph = __fmaf_rn(hdt, k1.vph, s.vph);
     rhs(tmp, b, L, k2);
 
-    tmp.t = __fmaf_rn(hdt, k2.t, s.t);
     tmp.l = __fmaf_rn(hdt, k2.l, s.l);
     tmp.th = __fmaf_rn(hdt, k2.th, s.th);
     tmp.ph = __fmaf_rn(hdt, k2.ph, s.ph);
-    tmp.vt = __fmaf_rn(hdt, k2.vt, s.vt);
     tmp.vl = __fmaf_rn(hdt, k2.vl, s.vl);
     tmp.vth = __fmaf_rn(hdt, k2.vth, s.vth);
     tmp.vph = __fmaf_rn(hdt, k2.vph, s.vph);
     rhs(tmp, b, L, k3);
 
-    tmp.t = __fmaf_rn(dt, k3.t, s.t);
     tmp.l = __fmaf_rn(dt, k3.l, s.l);
     tmp.th = __fmaf_rn(dt, k3.th, s.th);
     tmp.ph = __fmaf_rn(dt, k3.ph, s.ph);
-    tmp.vt = __fmaf_rn(dt, k3.vt, s.vt);
     tmp.vl = __fmaf_rn(dt, k3.vl, s.vl);
     tmp.vth = __fmaf_rn(dt, k3.vth, s.vth);
     tmp.vph = __fmaf_rn(dt, k3.vph, s.vph);
@@ -127,11 +106,9 @@ __forceinline__ __device__ void rk4_step(State &s, float dt, float b, float L)
     const float w = dt / 6.0f;
     const float w2 = w * 2.0f;
 
-    s.t = __fmaf_rn(w, k1.t, __fmaf_rn(w2, k2.t + k3.t, __fmaf_rn(w, k4.t, s.t)));
     s.l = __fmaf_rn(w, k1.l, __fmaf_rn(w2, k2.l + k3.l, __fmaf_rn(w, k4.l, s.l)));
     s.th = __fmaf_rn(w, k1.th, __fmaf_rn(w2, k2.th + k3.th, __fmaf_rn(w, k4.th, s.th)));
     s.ph = __fmaf_rn(w, k1.ph, __fmaf_rn(w2, k2.ph + k3.ph, __fmaf_rn(w, k4.ph, s.ph)));
-    s.vt = __fmaf_rn(w, k1.vt, __fmaf_rn(w2, k2.vt + k3.vt, __fmaf_rn(w, k4.vt, s.vt)));
     s.vl = __fmaf_rn(w, k1.vl, __fmaf_rn(w2, k2.vl + k3.vl, __fmaf_rn(w, k4.vl, s.vl)));
     s.vth = __fmaf_rn(w, k1.vth, __fmaf_rn(w2, k2.vth + k3.vth, __fmaf_rn(w, k4.vth, s.vth)));
     s.vph = __fmaf_rn(w, k1.vph, __fmaf_rn(w2, k2.vph + k3.vph, __fmaf_rn(w, k4.vph, s.vph)));
@@ -230,7 +207,6 @@ __forceinline__ __device__ uchar3 get_rgb_tex(cudaTextureObject_t tex, int width
 
 __forceinline__ __device__ uchar3 map_coordinates_to_pixel(
     float l, float theta, float phi,
-    float th0, float ph0,
     cudaTextureObject_t space1, int width1, int height1,
     cudaTextureObject_t space2, int width2, int height2)
 {
@@ -259,9 +235,8 @@ __forceinline__ __device__ void init_state(
     float vl = c_r;
     float vth = c_th / r;
     float vph = c_ph / (r * st);
-    float vt = sqrtf(vl * vl + r * r * (vth * vth + (st * st) * vph * vph));
 
-    s = {0.0f, l0, th0, ph0, vt, vl, vth, vph};
+    s = {l0, th0, ph0, vl, vth, vph};
 }
 
 __forceinline__ __device__ uchar3 trace_geodesic(
@@ -269,8 +244,6 @@ __forceinline__ __device__ uchar3 trace_geodesic(
     cudaTextureObject_t space1, int w1, int h1,
     cudaTextureObject_t space2, int w2, int h2)
 {
-    const float th0 = s.th;
-    const float ph0 = s.ph;
     const int steps = __float2int_rn(tmax / dt);
 
 #pragma unroll 4
@@ -283,7 +256,7 @@ __forceinline__ __device__ uchar3 trace_geodesic(
         }
     }
 
-    return map_coordinates_to_pixel(s.l, s.th, s.ph, th0, ph0, space1, w1, h1, space2, w2, h2);
+    return map_coordinates_to_pixel(s.l, s.th, s.ph, space1, w1, h1, space2, w2, h2);
 }
 
 #ifndef BLOCK_DIM
